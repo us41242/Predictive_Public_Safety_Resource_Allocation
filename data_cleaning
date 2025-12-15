@@ -89,28 +89,64 @@ def categorize_incidents(gdf):
     descriptions = gdf['IncidentTypeDescription'].str.lower().fillna('unknown')
 
     def map_category(desc):
-        if 'homicide' in desc or 'battery' in desc or 'assault' in desc or 'weapon' in desc or 'robbery' in desc:
+        # 1. VIOLENT CRIME (High Priority)
+        if ('homicide' in desc or 'battery' in desc or 'assault' in desc or 
+            'robbery' in desc or 'sex' in desc or 'gun' in desc or 
+            'knife' in desc or 'shooting' in desc or 'shot spotter' in desc or 
+            'fight' in desc or 'weapon' in desc):
             return 'Violent_Crime'
-        elif 'burglary' in desc or 'theft' in desc or 'shoplift' in desc or 'larceny' in desc:
+            
+        # 2. DOMESTIC / FAMILY
+        elif 'domestic' in desc or 'family' in desc:
+            return 'Domestic_Dispute'
+            
+        # 3. DISTURBANCE (New Category - distinct from violent crime but resource heavy)
+        elif 'disturbance' in desc or 'keep the peace' in desc or 'noise' in desc or 'nuisance' in desc:
+            return 'Public_Disturbance'
+            
+        # 4. PROPERTY CRIME
+        elif ('burglary' in desc or 'theft' in desc or 'shoplift' in desc or 
+              'larceny' in desc or 'stolen' in desc or 'property' in desc):
+            # Note: 'property' catches 'missing/found property' and 'stolen property'
+            # If you want 'malicious destruction' separate, handle it in Vandalism below
             return 'Property_Crime'
-        elif 'accident' in desc or 'crash' in desc or 'd.u.i.' in desc or 'traffic' in desc or 'vehicle' in desc:
+            
+        # 5. TRAFFIC
+        elif ('accident' in desc or 'crash' in desc or 'd.u.i.' in desc or 
+              'traffic' in desc or 'vehicle' in desc or 'hit and run' in desc or 
+              'drunk' in desc or 'reckless' in desc):
             return 'Traffic_Incident'
-        elif 'vandalism' in desc or 'graffiti' in desc or 'damage' in desc:
+            
+        # 6. VANDALISM
+        elif 'vandalism' in desc or 'graffiti' in desc or 'damage' in desc or 'destruct' in desc:
             return 'Vandalism'
-        elif 'check' in desc or 'suspicious' in desc or 'trespassing' in desc or 'welfare' in desc:
+            
+        # 7. PUBLIC SERVICE / NON-CRIMINAL (New Category)
+        elif ('assist' in desc or 'civil' in desc or 'missing' in desc or 
+              'runaway' in desc or 'found' in desc or 'dead body' in desc or 
+              'welfare' in desc):
+            return 'Public_Service'
+            
+        # 8. SUSPICIOUS ACTIVITY
+        elif 'check' in desc or 'suspicious' in desc or 'trespassing' in desc or 'wanted' in desc:
             return 'Suspicious_Activity'
+            
+        # 9. OTHER SPECIFIC
+        elif 'fraud' in desc or 'forgery' in desc:
+            return 'Fraud'
+        elif 'narcotics' in desc or 'drug' in desc:
+            return 'Drug_Offense'
         elif 'fire' in desc:
             return 'Fire'
-        elif 'domestic' in desc:
-            return 'Domestic_Dispute'
-        # Group everything else into a broad category
+            
+        # Group everything else
         else:
             return 'Miscellaneous'
 
     gdf['Crime_Category'] = descriptions.apply(map_category)
     
-    print("Top 5 Crime Categories:")
-    print(gdf['Crime_Category'].value_counts().head())
+    print("Top 10 Crime Categories:")
+    print(gdf['Crime_Category'].value_counts().head(10))
     
     return gdf
 

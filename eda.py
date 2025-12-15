@@ -86,6 +86,45 @@ def plot_spatial_sanity_check(df):
     print("Saved: 03_spatial_sanity_check.png")
     plt.close()
 
+# Plot 4: Normalized Temporal Analysis
+def plot_normalized_temporal(df):
+    """
+    Plots the Average Incidents per Day (normalizing for 5 weekdays vs 2 weekend days).
+    """
+    plt.figure(figsize=(10, 6))
+    
+    # 1. Calculate the raw counts
+    counts = df.groupby(['Time_Period', 'Is_Weekend'], observed=False).size().reset_index(name='Total_Counts')
+    
+    # 2. Normalize: Divide Weekday totals by 5, Weekend totals by 2
+    # Logic: If Is_Weekend == 1 (True), divide by 2. Else divide by 5.
+    counts['Daily_Average'] = counts.apply(
+        lambda row: row['Total_Counts'] / 2 if row['Is_Weekend'] == 1 else row['Total_Counts'] / 5, 
+        axis=1
+    )
+    
+    # 3. Plot the Averages
+    time_order = ['Morning', 'Afternoon', 'Evening', 'Late_Night']
+    
+    sns.barplot(
+        x='Time_Period', 
+        y='Daily_Average', 
+        hue='Is_Weekend', 
+        data=counts, 
+        order=time_order, 
+        palette='coolwarm'
+    )
+    
+    plt.title('Average Daily Incidents (Normalized)', fontsize=15)
+    plt.ylabel('Average Calls Per Day')
+    plt.xlabel('Time Period')
+    plt.legend(title='Is Weekend?', labels=['Weekday (Avg of 5 days)', 'Weekend (Avg of 2 days)'])
+    
+    plt.tight_layout()
+    plt.savefig('reports/figures/04_normalized_temporal.png')
+    print("Saved: 04_normalized_temporal.png")
+    plt.close()
+
 if __name__ == "__main__":
     setup_plotting()
     
@@ -103,5 +142,8 @@ if __name__ == "__main__":
         
         print("Generating Plot 3: Spatial Map...")
         plot_spatial_sanity_check(df)
+
+        print("Generating Plot 4: Normalized Temporal Patterns...")
+        plot_normalized_temporal(df)
         
         print(f"\nEDA Complete. Check the '{FIGURES_DIR}' folder for images.")

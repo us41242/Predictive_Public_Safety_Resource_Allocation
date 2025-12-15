@@ -149,6 +149,11 @@ def categorize_incidents(gdf):
     print(gdf['Crime_Category'].value_counts().head(10))
     
     return gdf
+    
+    print("Top 10 Crime Categories:")
+    print(gdf['Crime_Category'].value_counts().head(10))
+    
+    return gdf
 
 # Main Execution Flow
 if __name__ == '__main__':

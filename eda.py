@@ -4,7 +4,7 @@ import seaborn as sns
 import os
 
 # Configuration
-INPUT_PATH = 'data/cleaned_lvmpd_incidents.parquet'
+INPUT_PATH = 'data/cleaned_lvmpd_2023.parquet'
 FIGURES_DIR = 'reports/figures'
 
 def setup_plotting():

@@ -4,16 +4,21 @@ import pandas as pd
 import numpy as np
 import os
 
-# File paths
-FILE_PATH_2024 = 'data/LVMPD_Calls_For_Service_2024.geojson'
-OUTPUT_PATH = 'data/cleaned_lvmpd_incidents.parquet'
+# Configuration
+FILES = {
+    '2023': 'data/LVMPD_Calls_For_Service_2023.geojson',
+    '2024': 'data/LVMPD_Calls_For_Service_2024.geojson'
+}
+# Output will be 'data/cleaned_lvmpd_2023.parquet' and 'data/cleaned_lvmpd_2024.parquet'
+OUTPUT_TEMPLATE = 'data/cleaned_lvmpd_{year}.parquet'
 
-# Data Loading
 def load_data(file_path):
     """Loads a GeoJSON file into a GeoDataFrame."""
     print(f"Loading data from: {file_path}...")
     try:
-        # GeoPandas handles reading GeoJSON and automatically creates a GeoDataFrame
+        if not os.path.exists(file_path):
+            print(f"!!! Error: File not found: {file_path}")
+            return None
         gdf = gpd.read_file(file_path)
         print(f"Data loaded. Shape: {gdf.shape}")
         return gdf
@@ -21,175 +26,121 @@ def load_data(file_path):
         print(f"Error loading GeoJSON: {e}")
         return None
 
-# Data Type Cleaning Coordinate Handling
-
 def clean_types(gdf):
-    """Converts critical columns to proper data types and handles missing coordinates."""
+    """Converts critical columns and handles missing coordinates."""
+    print("Cleaning data types...")
     
-    print("Cleaning data types and dropping bad coordinates...")
-    
-    # Convert date/time string to datetime object
+    # Convert date/time
     gdf['IncidentDate'] = pd.to_datetime(gdf['IncidentDate'], errors='coerce')
     
-    # Ensure coordinates are float type, coercing errors to NaN
+    # --- TEMPORAL FIX: Drop exact midnight timestamps (likely artifacts) ---
+    is_midnight = gdf['IncidentDate'].dt.time == pd.to_datetime('00:00:00').time()
+    midnight_count = is_midnight.sum()
+    if midnight_count > 0:
+        print(f"Dropping {midnight_count} rows with default 00:00:00 timestamps...")
+        gdf = gdf[~is_midnight]
+
+    # Handle coordinates
     gdf['Latitude'] = pd.to_numeric(gdf['Latitude'], errors='coerce')
     gdf['Longitude'] = pd.to_numeric(gdf['Longitude'], errors='coerce')
     
-    # Drop any rows where critical columns (Date or coordinates) are missing
+    # Drop rows with missing critical data
     initial_rows = len(gdf)
     gdf.dropna(subset=['IncidentDate', 'Latitude', 'Longitude'], inplace=True)
-    rows_dropped = initial_rows - len(gdf)
-    print(f"Dropped {rows_dropped} rows with missing critical data.")
+    print(f"Dropped {initial_rows - len(gdf)} rows with missing critical data.")
     
     return gdf
 
-#Feature Engineering
-
 def create_features(gdf):
-    """Derives new features from existing columns for modeling."""
+    """Derives new features (Time Period, Weekend)."""
+    print("Creating features...")
     
-    print("Creating new features (Time Period, Is Weekend)...")
-    
-    # 1. Temporal Features: Is it the weekend? (Monday=0, Sunday=6)
+    # 1. Is it the weekend? (Fri-Sat-Sun usually behave differently)
+    # Using 5 (Sat) and 6 (Sun) is standard, but you can include Fri (4) if you want.
     gdf['Is_Weekend'] = gdf['IncidentDate'].dt.dayofweek.apply(lambda x: 1 if x >= 5 else 0)
     
     # 2. Time Period Categorization
     hour = gdf['IncidentDate'].dt.hour
-    
-    # Define time bins and labels for better modeling categories
     bins = [0, 6, 12, 17, 23, 24] 
     labels = ['Late_Night', 'Morning', 'Afternoon', 'Evening', 'Late_Night'] 
     
-    # Use pandas.cut to categorize the hour
-    # Correction 1: Remove .astype(str) and let pd.cut return a Categorical Series.
-    # Correction 2: Use the full labels list.
-    time_periods = pd.cut(
-        hour, 
-        bins=bins, 
-        labels=labels, 
-        right=False, 
-        ordered=False
-    )
-    
+    time_periods = pd.cut(hour, bins=bins, labels=labels, right=False, ordered=False)
     gdf['Time_Period'] = time_periods.astype('category')
-    print("Time Period value counts:")
-    print(gdf['Time_Period'].value_counts())                
-
     
     return gdf
 
-#Categorical Grouping
-
 def categorize_incidents(gdf):
-    """Maps detailed IncidentTypeDescription to high-level, actionable categories."""
-    
-    print("Categorizing incident descriptions into high-level crime types...")
-    
-    # Standardize text to lowercase for robust matching
+    """Improved categorization logic."""
+    print("Categorizing incidents...")
     descriptions = gdf['IncidentTypeDescription'].str.lower().fillna('unknown')
 
     def map_category(desc):
-        # 1. VIOLENT CRIME (High Priority)
+        # 1. VIOLENT CRIME
         if ('homicide' in desc or 'battery' in desc or 'assault' in desc or 
             'robbery' in desc or 'sex' in desc or 'gun' in desc or 
             'knife' in desc or 'shooting' in desc or 'shot spotter' in desc or 
             'fight' in desc or 'weapon' in desc):
             return 'Violent_Crime'
-            
-        # 2. DOMESTIC / FAMILY
+        # 2. DOMESTIC
         elif 'domestic' in desc or 'family' in desc:
             return 'Domestic_Dispute'
-            
-        # 3. DISTURBANCE (New Category - distinct from violent crime but resource heavy)
+        # 3. DISTURBANCE
         elif 'disturbance' in desc or 'keep the peace' in desc or 'noise' in desc or 'nuisance' in desc:
             return 'Public_Disturbance'
-            
-        # 4. PROPERTY CRIME
+        # 4. PROPERTY
         elif ('burglary' in desc or 'theft' in desc or 'shoplift' in desc or 
               'larceny' in desc or 'stolen' in desc or 'property' in desc):
-            # Note: 'property' catches 'missing/found property' and 'stolen property'
-            # If you want 'malicious destruction' separate, handle it in Vandalism below
             return 'Property_Crime'
-            
         # 5. TRAFFIC
         elif ('accident' in desc or 'crash' in desc or 'd.u.i.' in desc or 
               'traffic' in desc or 'vehicle' in desc or 'hit and run' in desc or 
               'drunk' in desc or 'reckless' in desc):
             return 'Traffic_Incident'
-            
         # 6. VANDALISM
         elif 'vandalism' in desc or 'graffiti' in desc or 'damage' in desc or 'destruct' in desc:
             return 'Vandalism'
-            
-        # 7. PUBLIC SERVICE / NON-CRIMINAL (New Category)
+        # 7. PUBLIC SERVICE
         elif ('assist' in desc or 'civil' in desc or 'missing' in desc or 
               'runaway' in desc or 'found' in desc or 'dead body' in desc or 
               'welfare' in desc):
             return 'Public_Service'
-            
-        # 8. SUSPICIOUS ACTIVITY
+        # 8. SUSPICIOUS
         elif 'check' in desc or 'suspicious' in desc or 'trespassing' in desc or 'wanted' in desc:
             return 'Suspicious_Activity'
-            
-        # 9. OTHER SPECIFIC
+        # 9. OTHER
         elif 'fraud' in desc or 'forgery' in desc:
             return 'Fraud'
         elif 'narcotics' in desc or 'drug' in desc:
             return 'Drug_Offense'
         elif 'fire' in desc:
             return 'Fire'
-            
-        # Group everything else
         else:
             return 'Miscellaneous'
 
     gdf['Crime_Category'] = descriptions.apply(map_category)
-    
-    print("Top 10 Crime Categories:")
-    print(gdf['Crime_Category'].value_counts().head(10))
-    
-    return gdf
-    
-    print("Top 10 Crime Categories:")
-    print(gdf['Crime_Category'].value_counts().head(10))
-    
     return gdf
 
-# Main Execution Flow
 if __name__ == '__main__':
-    # 1. Load the data
-    gdf = load_data(FILE_PATH_2024)
-    
-    if gdf is None:
-        print("Script terminated due to data loading error.")
-    else:
-        # 2. Clean data types and handle missing values
-        gdf_cleaned = clean_types(gdf.copy())
+    for year, file_path in FILES.items():
+        print(f"\n--- Processing {year} Data ---")
         
-        # 3. Create new features
-        gdf_features = create_features(gdf_cleaned)
+        # 1. Load
+        gdf = load_data(file_path)
         
-        # 4. Categorize incidents
-        gdf_final = categorize_incidents(gdf_features)
-        
-        # 5. Save the final cleaned GeoDataFrame to Parquet
-        # Requires 'pyarrow' to be installed (pip install pyarrow)
-        print(f"\nSaving final cleaned data to: {OUTPUT_PATH}")
-        
-        try:
-            gdf_final.to_parquet(OUTPUT_PATH)
-            print("Cleaning complete. Data is ready for EDA!")
-        except ImportError:
-            print("\n!!! ERROR: Pyarrow is not installed. Data not saved to Parquet. !!!")
-            print("Please run: pip install pyarrow")
-        except Exception as e:
-            print(f"An unexpected error occurred during saving: {e}")
+        if gdf is not None:
+            # 2. Clean
+            gdf = clean_types(gdf)
+            # 3. Feature Engineering
+            gdf = create_features(gdf)
+            # 4. Categorize
+            gdf = categorize_incidents(gdf)
+            
+            # 5. Save
+            output_path = OUTPUT_TEMPLATE.format(year=year)
+            print(f"Saving {year} data to: {output_path}")
+            try:
+                gdf.to_parquet(output_path)
+                print(f"Success! {year} data ready.")
+            except Exception as e:
+                print(f"Error saving parquet: {e}")
 
-# Optional: Display first few rows of the final cleaned data
-gdf = gpd.read_parquet(OUTPUT_PATH)
-print("\n--- First 5 Rows (gdf.head()) ---")
-print(gdf.head())
-
-# Optional: Display column information
-print("\n--- Column Information (gdf.info()) ---")
-gdf.info()
